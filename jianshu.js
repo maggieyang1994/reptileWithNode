@@ -34,10 +34,19 @@ const getList = (listUrls, leakUrl) => {
 
 
 let listUrls = Array.from({ length: 3 }, (x, i) => url + (i + 1));
-let leakUrl = []
-getList(listUrls,leakUrl).then(res => {
-    console.log(res);
-    // if(res.leakUrl.length)
+let result = []
+const fn = (listUrls, result) => {
+    return new Promise((resolve, reject) => {
+        getList(listUrls, []).then(res => {
+            // if leak   do fn  util no leak   
+            if(res.leakUrl.length) {result= result.concat(res.res);fn(res.leakUrl, result);  }
+            else resolve(result)
+        })
+    })
+   
+}
+fn(listUrls, result).then(data => {
+    console.log(data)
 })
 
 

@@ -10,6 +10,8 @@
   "license": "ISC",
   "dependencies": {
     "async": "^2.6.2",
+    "axios": "^0.18.0",
+    "promise-mysql": "^3.3.1",
     "request": "^2.88.0"
   }
 }
