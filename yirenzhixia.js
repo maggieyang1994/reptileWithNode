@@ -29,10 +29,10 @@ const getChaptersList = url => {
                     let sid = +path.match(/([\d]+)\.html/)[1]
                     let imgCount = +name.match(/（([\d]+)P）/)[1]
 
-                    return {path, name, sid, imgCount}
+                    return { path, name, sid, imgCount }
                 })
                 .sort((x, y) => x.sid - y.sid)
-                // .slice(0, 5)
+            // .slice(0, 5)
         })
         .catch(e => {
             console.error('获取章节列表失败。')
