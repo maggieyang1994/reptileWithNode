@@ -13,44 +13,43 @@ let pool = mysql.createPool({
 })
 let listTxt = ''
 let imageTxt = ''
-const logTxt = (list, txt) => {
-    list += txt;
+const logListTxt = (txt) => {
+    listTxt += txt + "\n"
     console.log(txt)
 }
+const logImageTxt = (txt) => {
+    imageTxt += txt + "\n"
+    console.log(txt)
+}
+const writeFile = (file, txt) => {
+    fs.writeFile(file, txt, "utf-8", (err, res) => {
+        if (err) console.log(err);
+        console.log(`${file}: 文件已经被保存`)
+    })
+}
 const getList = () => {
-    return new Promise((resolve, reject) => {
-        // axios.get(listUrl).then(res => {
-            let $ = cheerio.load(res.data);
-            let li = Array.from($("#chapterlistload #detail-list-select-1 li")).reverse().slice(0, 3)
-            return li.map((x, index) => {
-                let chapter = $(x).text().replace(/[\r\n]/g, "").trim();
-                let totalP = chapter.match(/\d+(?=P)/g)[0];
-                let href = $(x).find("a").attr("href")
-                return {
-                    index: index + 1,
-                    chapter,
-                    totalP,
-                    href
-                }
-            })
-        }).catch(e => reject(e))
+    // axios.get 返回的本来就是promise  这里不用new Promise
+    // return new Promise((resolve, reject) => {
+    return axios.get(listUrl).then(res => {
+        let $ = cheerio.load(res.data);
+        let li = Array.from($("#chapterlistload #detail-list-select-1 li")).reverse().slice(0, 3)
+        return li.map((x, index) => {
+            let chapter = $(x).text().replace(/[\r\n]/g, "").trim();
+            let totalP = chapter.match(/\d+(?=P)/g)[0];
+            let href = $(x).find("a").attr("href")
+            return {
+                chapterId: index + 1,
+                chapter,
+                totalP,
+                href
+            }
+        })
+    }).catch(e => Promise.reject(e))
     // })
 
 }
-const insertList = async (list, insertFailList = []) => {
-    await Promise.all(list.map(x => {
-        let sqlStr = `insert into yirenzhixia.directory1(chapterId, chapter) values(${x.index}, '${x.chapter}')`;
-        return pool.query(sqlStr).then(res => {
-            if (res.serverStatus === 2) logTxt(listTxt, `insert sucess:${x.index}-${x.chapter}`)
-            else { insertFailList.push(x); logTxt(listTxt, `insert Fail:${x.index}-${x.chapter}`) }
-        })
-    }))
-    if (insertFailList.length) await insertList(insertFailList);
-    else return;
-}
 
-
-// 处理图片
+// 拿到图片
 const getImageList = (list) => {
     return new Promise((resolve, reject) => {
         async.mapLimit(list, 5, (cur, callback) => {
@@ -61,7 +60,7 @@ const getImageList = (list) => {
                 let pad = code.length;
                 let len = cur.totalP * 1;
                 for (let i = code; i <= len; i++) {
-                    temp.push({ chapterId: cur.index, imageUrl: `https://mh1.wan1979.com/upload/yirenzhixia/${realPage}/${String(i).padStart(pad, 0)}.jpg` })
+                    temp.push({ chapterId: cur.chapterId, ImageUrl: `https://mh1.wan1979.com/upload/yirenzhixia/${realPage}/${String(i).padStart(pad, 0)}.jpg` })
                 }
                 callback(null, temp)
             }).catch(e => console.log(e))
@@ -73,35 +72,53 @@ const getImageList = (list) => {
 
 }
 
-// 存储图片
-const insertImage = async(list, insertFailList = []) => {
-    await Promise.all(list.map(x => {
-        let sqlStr = `insert into yirenzhixia.ImageList1(chapterId, ImageUrl) values(${x.chapterId}, '${x.imageUrl}')`;
-        return pool.query(sqlStr).then(res => {
-            if (res.serverStatus === 2) logTxt(imageTxt, `insert sucess:${x.chapterId}-${x.imageUrl}`)
-            else { insertFailList.push(x); logTxt(imageTxt, `insert Fail:${x.chapterId}-${x.imageUrl}`) }
+const insertList = async (list,tableName, column1, column2, log,insertFailList = []) => {
+    // 万箭齐发版本
+    // await Promise.all(list.map(cur => {
+    //     let sqlStr = `insert into ${tableName}(column1, column2) values(${cur[column1]}, '${cur[column2]}')`;
+    //     return pool.query(sqlStr).then(res => {
+    //         if (res.serverStatus === 2) log.call(null,`insert sucess:${cur[column1]}-${cur[column2]}`)
+    //     }).catch(e => {
+    //         log.call(null,`insert fail:${cur[column1]}-${cur[column2]}- ${e}`);
+    //         if(e.code !== 'ER_DUP_ENTRY') insertFailList.push(cur)
+    //     })
+    // }))
+    // if (insertFailList.length) await insertList(insertFailList,tableName, column1, column2);
+    // else return
+
+
+
+    // 控制并发版本
+    return new Promise((resolve, reject) => {
+        async.mapLimit(list, 2, (cur, callback) => {
+            let sqlStr = `insert into ${tableName}(${column1}, ${column2}) values(${cur[column1]}, '${cur[column2]}')`;
+            pool.query(sqlStr).then(res => {
+                if (res.serverStatus === 2) { log.call(null, `insert sucess:${cur[column1]}-${cur[column2]}`); callback(null, []) }
+            }).catch(e => {
+                log.call(null,`insert fail:${cur[column1]}-${cur[column2]}- ${e}`);
+                if (e.code !== 'ER_DUP_ENTRY') insertFailList.push(cur);
+                callback(null, insertFailList)
+            })
+        }, async (err, result) => {
+            if (err) reject(err);
+            result = result.reduce((o, item) => o.concat(item));
+            if (result.length) await insertList(result,tableName, column1, column2,log);
+            else resolve()
         })
-    }))
-    if (insertFailList.length) insertList(insertFailList);
-    else return;
+    })
 
 }
-const writeFile = (file, txt) => {
-    fs.writeFile(file, txt, "utf-8", (err, res) => {
-        if (err) console.log(err);
-        console.log(`${file}: 文件已经被保存`)
-    })
-}
+
 const run = async () => {
     let list = await getList();
-    insertList(list).then(() => {
-        logTxt(listTxt,`插入directory完毕`)
-        writeFile(path.resolve("insertDic.txt"), imageTxt)
+    insertList(list, "directory1", 'chapterId', "chapter", logListTxt).then(() => {
+        logListTxt(`插入directory完毕`)
+        writeFile(path.resolve("reptileWithNode/log/insertDic.txt"), listTxt)
     })
     let imageList = await getImageList(list);
-    insertImage(imageList).then(() => {
-        logTxt(imageTxt,`插入imageList完毕`); 
-        writeFile(path.resolve("insertiImage.txt"), imageTxt)
+    insertList(imageList,"ImageList1", "chapterId", "ImageUrl",logImageTxt).then(() => {
+        logImageTxt(`插入imageList完毕`);
+        writeFile(path.resolve("reptileWithNode/log/insertiImage.txt"), imageTxt)
     })
 }
 
