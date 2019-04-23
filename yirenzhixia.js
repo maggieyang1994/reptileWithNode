@@ -27,18 +27,19 @@ const writeFile = (file, txt) => {
         console.log(`${file}: 文件已经被保存`)
     })
 }
-const getList = () => {
+const getList = (count) => {
     // axios.get 返回的本来就是promise  这里不用new Promise
     // return new Promise((resolve, reject) => {
     return axios.get(listUrl).then(res => {
         let $ = cheerio.load(res.data);
-        let li = Array.from($("#chapterlistload #detail-list-select-1 li")).reverse().slice(0, 3)
+        let li = Array.from($("#chapterlistload #detail-list-select-1 li")).reverse();
+        if(li.length > count) li = li.slice(count)
         return li.map((x, index) => {
             let chapter = $(x).text().replace(/[\r\n]/g, "").trim();
             let totalP = chapter.match(/\d+(?=P)/g)[0];
             let href = $(x).find("a").attr("href")
             return {
-                chapterId: index + 1,
+                chapterId: count + 1,
                 chapter,
                 totalP,
                 href
@@ -54,16 +55,22 @@ const getImageList = (list) => {
     return new Promise((resolve, reject) => {
         async.mapLimit(list, 5, (cur, callback) => {
             let temp = []
-            let realPage = cur.href.match(/\d+(?=\.html)/g)[0]
+            let realPage = cur.href.match(/\d+(?=\.html)/g);
+            realPage = realPage && realPage[0]
             axios.get(`https://www.tohomh123.com/action/play/read?did=7155&sid=${realPage}&iid=1`).then(res => {
-                let code = res.data.Code.match(/\d+(?=\.jpg)/g)[0];
+                let code = res.data.Code.match(/\d+(?=\.jpg)/g)
+                code = realPage * 1 === 383 ? res.data.Code.match(/\((\d+)\)(?=\.jpg)/)[1] : code[0]
                 let pad = code.length;
                 let len = cur.totalP * 1;
                 for (let i = code; i <= len; i++) {
-                    temp.push({ chapterId: cur.chapterId, ImageUrl: `https://mh1.wan1979.com/upload/yirenzhixia/${realPage}/${String(i).padStart(pad, 0)}.jpg` })
+                    temp.push({ chapterId: cur.chapterId, ImageUrl: realPage* 1 === 383 ? `https://mh1.wan1979.com/upload/yirenzhixia/${realPage}/0(${i}).jpg`:`https://mh1.wan1979.com/upload/yirenzhixia/${realPage}/${String(i).padStart(pad, 0)}.jpg` })
                 }
                 callback(null, temp)
-            }).catch(e => console.log(e))
+            }).catch(e => {
+                console.log(cur)
+                console.log(e);
+                callback(e)
+            })
         }, (err, result) => {
             if (err) reject(err)
             resolve(result.reduce((o, item) => o.concat(item)))
@@ -110,15 +117,16 @@ const insertList = async (list,tableName, column1, column2, log,insertFailList =
 }
 
 const run = async () => {
-    let list = await getList();
+    let [{count}] = await pool.query("select count(*) as count from yirenzhixia.directory1")
+    let list = await getList(count);
     insertList(list, "directory1", 'chapterId', "chapter", logListTxt).then(() => {
         logListTxt(`插入directory完毕`)
-        writeFile(path.resolve("reptileWithNode/log/insertDic.txt"), listTxt)
+        writeFile(path.resolve("log/insertDic.txt"), listTxt)
     })
     let imageList = await getImageList(list);
     insertList(imageList,"ImageList1", "chapterId", "ImageUrl",logImageTxt).then(() => {
         logImageTxt(`插入imageList完毕`);
-        writeFile(path.resolve("reptileWithNode/log/insertiImage.txt"), imageTxt)
+        writeFile(path.resolve("log/insertiImage.txt"), imageTxt)
     })
 }
 
